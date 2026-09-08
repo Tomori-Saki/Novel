@@ -1,4 +1,5 @@
-# 章节内容变更流水线：校验 DSL 编译与测试，通过后由 deploy.yml 部署站点
+# 章节播放内容变更流水线（仅 .story.txt，不含书写稿 .md）
+# 书写模型改 chapterN.md → coding agent 转 chapterN.story.txt → 推送后触发本流水线
 name: Story Update
 
 on:

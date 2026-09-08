@@ -1,9 +1,14 @@
 /**
- * 章节同步脚本：检测 src/stories 下 .story.txt 变更 → 跑测试 → 提交 → 推送。
+ * 章节同步脚本：仅检测 src/stories 下 .story.txt 变更 → 跑测试 → 提交 → 推送。
+ *
+ * 工作流分工：
+ *   - 书写模型：只改 chapterN.md（文稿源，不参与播放）
+ *   - Coding agent：将 md 转为 chapterN.story.txt（播放 DSL，需人工/Agent 转换）
+ *   - 本脚本 + CI：只在 .story.txt 变更时校验、提交、部署
  *
  * 用法：
  *   node scripts/sync-chapters.mjs          # 单次同步
- *   node scripts/sync-chapters.mjs --watch  # 监听文件变更后自动同步
+ *   node scripts/sync-chapters.mjs --watch  # 监听 .story.txt 变更后自动同步
  *   node scripts/sync-chapters.mjs --dry-run  # 仅预览，不提交推送
  */
 import { execSync, spawnSync } from 'node:child_process';
@@ -85,19 +90,33 @@ export function buildCommitMessage(changedFiles) {
   return `${nums.map(toChineseChapter).join('、')}章节更新`;
 }
 
-/** 获取 stories 目录下待同步的 .story.txt（含未跟踪、已暂存、工作区修改） */
-function collectChangedStoryFiles() {
+function collectChangedFilesUnderStories(filter) {
   const chunks = [
     runCapture('git diff --name-only -- src/stories'),
     runCapture('git diff --cached --name-only -- src/stories'),
     runCapture('git ls-files --others --exclude-standard -- src/stories'),
   ];
-  const files = chunks
-    .flatMap((s) => (s ? s.split('\n') : []))
-    .map((f) => f.trim())
-    .filter((f) => f.endsWith('.story.txt') && !f.endsWith('.bak'))
-    .map((f) => f.replace(/\\/g, '/'));
-  return [...new Set(files)];
+  return [
+    ...new Set(
+      chunks
+        .flatMap((s) => (s ? s.split('\n') : []))
+        .map((f) => f.trim())
+        .filter(filter)
+        .map((f) => f.replace(/\\/g, '/')),
+    ),
+  ];
+}
+
+/** 获取待同步的 .story.txt（含未跟踪、已暂存、工作区修改） */
+function collectChangedStoryFiles() {
+  return collectChangedFilesUnderStories(
+    (f) => f.endsWith('.story.txt') && !f.endsWith('.bak'),
+  );
+}
+
+/** 获取变更的文稿 .md（书写模型产物，不触发自动推送） */
+function collectChangedMdFiles() {
+  return collectChangedFilesUnderStories((f) => /chapter\d+\.md$/i.test(f));
 }
 
 function hasUnpushedCommits() {
@@ -112,10 +131,18 @@ function hasUnpushedCommits() {
 
 export async function syncOnce() {
   const changed = collectChangedStoryFiles();
+  const pendingMd = collectChangedMdFiles();
   const unpushed = hasUnpushedCommits();
 
+  if (changed.length === 0 && pendingMd.length > 0) {
+    console.log('[story:sync] 检测到文稿 .md 变更，但尚无 .story.txt 更新：');
+    pendingMd.forEach((f) => console.log(`  - ${f}`));
+    console.log('[story:sync] .md 无法自动转为播放 DSL，请由 coding agent 完成转换后再运行本脚本。');
+    return { ok: true, skipped: true, pendingMd: true };
+  }
+
   if (changed.length === 0 && !unpushed) {
-    console.log('[story:sync] 没有章节变更，也无需推送。');
+    console.log('[story:sync] 没有 .story.txt 变更，也无需推送。');
     return { ok: true, skipped: true };
   }
 
@@ -131,6 +158,14 @@ export async function syncOnce() {
       return { ok: false };
     }
 
+    const mdToInclude = collectChangedMdFiles();
+    const filesToAdd = [...changed, ...mdToInclude];
+
+    if (mdToInclude.length > 0) {
+      console.log('[story:sync] 同时纳入文稿 .md：');
+      mdToInclude.forEach((f) => console.log(`  - ${f}`));
+    }
+
     const message = buildCommitMessage(changed);
     console.log(`[story:sync] 提交说明：${message}`);
 
@@ -139,7 +174,7 @@ export async function syncOnce() {
       return { ok: true, dryRun: true, message };
     }
 
-    const add = spawnSync('git', ['add', '--', ...changed], { cwd: ROOT, stdio: 'inherit' });
+    const add = spawnSync('git', ['add', '--', ...filesToAdd], { cwd: ROOT, stdio: 'inherit' });
     if (add.status !== 0) return { ok: false };
 
     const status = runCapture('git status --porcelain');
