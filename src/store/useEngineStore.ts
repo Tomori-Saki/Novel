@@ -144,6 +144,31 @@ export function selectIsLeaf(s: EngineStore): boolean {
   return node.choices.length === 0 && !node.next;
 }
 
+/** 翻页预览：下一节点正文；无下一节点则为结局页。有分支时由阅读器本地展示选项页。 */
+export function selectPeekNext(s: EngineStore): { lines: Line[]; choices: Choice[]; hasChoices: boolean } | 'ending' | null {
+  if (!s.story || !s.state) return null;
+  const node = selectCurrentNode(s);
+  if (!node) return null;
+  if (node.choices.length > 0) return null;
+  if (node.next && s.story.nodes[node.next]) {
+    const n = s.story.nodes[node.next];
+    return { lines: n.lines, choices: [], hasChoices: false };
+  }
+  return 'ending';
+}
+
+/** 翻页预览：历史栈顶对应节点（含当时可见选项），供向左仿真翻页。 */
+export function selectPeekPrev(s: EngineStore): { lines: Line[]; choices: Choice[]; hasChoices: boolean } | null {
+  if (!s.story || !s.state) return null;
+  const last = s.state.history[s.state.history.length - 1];
+  if (!last) return null;
+  const restored: GameState = { ...last, history: s.state.history.slice(0, -1) };
+  const node = s.story.nodes[restored.currentNodeId];
+  if (!node) return null;
+  const vis = node.choices.length > 0 ? availableChoices(s.story, restored) : [];
+  return { lines: node.lines, choices: vis, hasChoices: node.choices.length > 0 };
+}
+
 export function selectEndedEnding(s: EngineStore) {
   if (!s.story || !s.state || !s.state.ended) return null;
   return findEnding(s.story, s.state.ended);
