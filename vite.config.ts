@@ -15,10 +15,10 @@ export default defineConfig({
       manifest: {
         name: '魔法少女的魔女审判 · 互动小说',
         short_name: '魔女审判',
-        description: '章节制互动小说播放器（信息差驱动 · 支持离线游玩）',
+        description: '文本优先的互动小说播放器（支持离线游玩）',
         lang: 'zh-CN',
-        theme_color: '#1a1a2e',
-        background_color: '#0f0f1a',
+        theme_color: '#120f1c',
+        background_color: '#120f1c',
         display: 'standalone',
         orientation: 'portrait',
         start_url: './',

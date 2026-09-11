@@ -1,5 +1,5 @@
 /**
- * 仿真书本阅读器：跟手卷页 + 点按左右翻页 + 节点内按屏分页。
+ * 仿真书本阅读器：对开页（左文右选项）+ 跟手卷页。
  */
 import {
   useCallback,
@@ -10,7 +10,6 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
-  type ReactNode,
 } from 'react';
 import type { Choice, Line } from '../../engine/types';
 import { PageFace } from './PageFace';
@@ -24,31 +23,31 @@ export interface PeekNode {
 
 export type PeekNext = PeekNode | 'ending' | null;
 
-interface NavApi {
+export interface BookNav {
   goPrev: () => void;
   canGoPrev: boolean;
 }
 
 interface Props {
-  title: string;
+  chapterLabel: string;
+  percent: number;
+  pageNumber: number;
   nodeId: string;
-  sectionIndex: number;
   paragraphs: Line[];
   choices: Choice[];
   hasChoices: boolean;
   canRewind: boolean;
   peekNext: PeekNext;
   peekPrev: PeekNode | null;
-  peekGoto: (choiceId: string) => Line[];
+  peekGoto: (choiceId: string) => PeekNode;
   onEngineNext: () => void;
   onEnginePrev: () => void;
   onPick: (choiceId: string) => void;
-  settings: (api: NavApi) => ReactNode;
+  onNavChange?: (nav: BookNav) => void;
 }
 
 type SheetContent =
-  | { type: 'text'; paragraphs: Line[]; pageIndex: number | 'last' }
-  | { type: 'choices'; choices: Choice[] }
+  | { type: 'text'; paragraphs: Line[]; pageIndex: number | 'last'; choices: Choice[] }
   | { type: 'ending' }
   | { type: 'blank' };
 
@@ -98,57 +97,99 @@ function animateProgress(from: number, to: number, onFrame: (p: number) => void,
   return () => cancelAnimationFrame(raf);
 }
 
-function SheetView({
+function choiceLetter(i: number): string {
+  return String.fromCharCode(65 + (i % 26));
+}
+
+function ChoicesPane({
+  choices,
+  onPick,
+}: {
+  choices: Choice[];
+  onPick?: (id: string) => void;
+}) {
+  if (choices.length === 0) {
+    return <div className="choices-pane choices-pane-empty" />;
+  }
+  return (
+    <article className="choices-pane">
+      <h2 className="choices-kicker">选择</h2>
+      <div className="choices">
+        {choices.map((c, i) => (
+          <button
+            key={c.id}
+            type="button"
+            className="choice-card no-turn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick?.(c.id);
+            }}
+          >
+            <span className="choice-letter">{choiceLetter(i)}</span>
+            <span className="choice-label">{c.label}</span>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SpreadView({
   content,
+  pageNumber,
   onTextPageCount,
   onPick,
 }: {
   content: SheetContent;
+  pageNumber?: number;
   onTextPageCount?: (n: number) => void;
   onPick?: (id: string) => void;
 }) {
-  if (content.type === 'blank') return <div className="page-clip" />;
-  if (content.type === 'ending') {
+  if (content.type === 'blank') {
     return (
-      <div className="page-clip page-leaf">
-        <p className="dim">纸页在此用尽。</p>
-        <p>故事将翻向结局。</p>
+      <div className="book-spread">
+        <div className="leaf leaf-left">
+          <div className="page-clip" />
+        </div>
+        <div className="book-gutter" aria-hidden />
+        <div className="leaf leaf-right" />
       </div>
     );
   }
-  if (content.type === 'choices') {
+  if (content.type === 'ending') {
     return (
-      <article className="choices-page">
-        <h2 className="choices-heading">故事在此分岔</h2>
-        {content.choices.length === 0 ? (
-          <p className="dim">（此刻没有可行的方向，向左翻回正文。）</p>
-        ) : (
-          <div className="choices">
-            {content.choices.map((c) => (
-              <button
-                key={c.id}
-                className="choice-card no-turn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPick?.(c.id);
-                }}
-              >
-                {c.label}
-              </button>
-            ))}
+      <div className="book-spread">
+        <div className="leaf leaf-left">
+          <div className="page-clip page-leaf">
+            <p className="dim">纸页在此用尽。</p>
+            <p>故事将翻向结局。</p>
           </div>
-        )}
-      </article>
+        </div>
+        <div className="book-gutter" aria-hidden />
+        <div className="leaf leaf-right" />
+      </div>
     );
   }
-  return <PageFace paragraphs={content.paragraphs} pageIndex={content.pageIndex} onPageCount={onTextPageCount} />;
+  return (
+    <div className="book-spread">
+      <div className="leaf leaf-left">
+        {pageNumber != null && <div className="leaf-pagenum">{pageNumber}</div>}
+        <PageFace paragraphs={content.paragraphs} pageIndex={content.pageIndex} onPageCount={onTextPageCount} />
+      </div>
+      <div className="book-gutter" aria-hidden />
+      <div className="leaf leaf-right">
+        <ChoicesPane choices={content.choices} onPick={onPick} />
+      </div>
+    </div>
+  );
 }
 
 export function BookReader(p: Props) {
   const {
-    title,
+    chapterLabel,
+    percent,
+    pageNumber,
     nodeId,
-    sectionIndex,
     paragraphs,
     choices,
     hasChoices,
@@ -159,7 +200,7 @@ export function BookReader(p: Props) {
     onEngineNext,
     onEnginePrev,
     onPick,
-    settings,
+    onNavChange,
   } = p;
 
   const shellRef = useRef<HTMLDivElement>(null);
@@ -176,8 +217,6 @@ export function BookReader(p: Props) {
   const [visualIndex, setVisualIndex] = useState(0);
   const [landLast, setLandLast] = useState(false);
   const [flip, setFlip] = useState<FlipState>(IDLE);
-  const [chromeOpen, setChromeOpen] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [hint, setHint] = useState(() => {
     try {
       return sessionStorage.getItem('reader-hint-seen') !== '1';
@@ -191,8 +230,7 @@ export function BookReader(p: Props) {
   const handlePageCount = useCallback((n: number) => {
     setTextPageCount(n);
     if (landLastRef.current) {
-      const hc = hasChoicesRef.current;
-      setVisualIndex(hc ? n : Math.max(0, n - 1));
+      setVisualIndex(Math.max(0, n - 1));
       landLastRef.current = false;
       setLandLast(false);
     }
@@ -233,30 +271,25 @@ export function BookReader(p: Props) {
   const idx = Math.min(visualIndex, last);
 
   const currentSheet = (): SheetContent => {
-    if (hasChoices && (landLast || idx >= textPageCount)) {
-      return { type: 'choices', choices };
-    }
-    if (landLast) return { type: 'text', paragraphs, pageIndex: 'last' };
-    return { type: 'text', paragraphs, pageIndex: Math.max(0, idx) };
+    if (landLast) return { type: 'text', paragraphs, pageIndex: 'last', choices };
+    return { type: 'text', paragraphs, pageIndex: Math.max(0, idx), choices };
   };
 
   const buildDest = (plan: TurnPlan, pickId?: string): SheetContent => {
     if (plan.kind === 'blocked') return { type: 'blank' };
     if (plan.kind === 'local') {
-      if (hasChoices && plan.nextIndex >= textPageCount) return { type: 'choices', choices };
-      return { type: 'text', paragraphs, pageIndex: plan.nextIndex };
+      return { type: 'text', paragraphs, pageIndex: plan.nextIndex, choices };
     }
     if (plan.kind === 'engine-next') {
       if (peekNext === 'ending' || peekNext === null) return { type: 'ending' };
-      return { type: 'text', paragraphs: peekNext.lines, pageIndex: 0 };
+      return { type: 'text', paragraphs: peekNext.lines, pageIndex: 0, choices: peekNext.choices };
     }
     if (plan.kind === 'engine-prev') {
       if (!peekPrev) return { type: 'blank' };
-      if (peekPrev.hasChoices) return { type: 'choices', choices: peekPrev.choices };
-      return { type: 'text', paragraphs: peekPrev.lines, pageIndex: 'last' };
+      return { type: 'text', paragraphs: peekPrev.lines, pageIndex: 'last', choices: peekPrev.choices };
     }
-    const lines = peekGoto(pickId ?? plan.choiceId);
-    return { type: 'text', paragraphs: lines, pageIndex: 0 };
+    const next = peekGoto(pickId ?? plan.choiceId);
+    return { type: 'text', paragraphs: next.lines, pageIndex: 0, choices: next.choices };
   };
 
   const commitPlan = (plan: TurnPlan) => {
@@ -321,8 +354,6 @@ export function BookReader(p: Props) {
     const dest = buildDest(plan);
     const blocked = plan.kind === 'blocked';
     const base = { dir, blocked, dest, plan };
-    setChromeOpen(false);
-    setMenuOpen(false);
     if (blocked) {
       playTo(0, 0.13, base, () => {
         playTo(0.13, 0, base, () => {
@@ -340,8 +371,6 @@ export function BookReader(p: Props) {
     const plan: TurnPlan = { kind: 'engine-pick', choiceId };
     const dest = buildDest(plan, choiceId);
     const base = { dir: 'next' as const, blocked: false, dest, plan };
-    setChromeOpen(false);
-    setMenuOpen(false);
     playTo(0, 1, base, () => commitPlan(plan));
   };
 
@@ -394,8 +423,6 @@ export function BookReader(p: Props) {
         hasChoices,
         canRewind,
       });
-      setChromeOpen(false);
-      setMenuOpen(false);
       setHint(false);
       setFlip({
         phase: 'dragging',
@@ -423,11 +450,9 @@ export function BookReader(p: Props) {
     const w = shellRef.current?.clientWidth || window.innerWidth;
 
     if (!s.dragging) {
-      if (menuOpen) return;
       const ratio = e.clientX / w;
       if (ratio < 0.28) startFlip('prev');
       else if (ratio > 0.72) startFlip('next');
-      else setChromeOpen((v) => !v);
       return;
     }
 
@@ -447,18 +472,7 @@ export function BookReader(p: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const tag = (e.target as HTMLElement).tagName;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (menuOpen) {
-        setMenuOpen(false);
-        readerRef.current?.focus();
-        return;
-      }
-      setChromeOpen((v) => !v);
-      return;
-    }
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (menuOpen) return;
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
       e.preventDefault();
       startFlip('next');
@@ -470,14 +484,12 @@ export function BookReader(p: Props) {
 
   const startFlipRef = useRef(startFlip);
   startFlipRef.current = startFlip;
-  const menuOpenRef = useRef(menuOpen);
-  menuOpenRef.current = menuOpen;
 
   useEffect(() => {
     const el = shellRef.current;
     if (!el) return;
     const onWheel = (ev: WheelEvent) => {
-      if (busyRef.current || menuOpenRef.current) return;
+      if (busyRef.current) return;
       if (Math.abs(ev.deltaY) < 20 && Math.abs(ev.deltaX) < 20) return;
       ev.preventDefault();
       const goNext = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX > 0 : ev.deltaY > 0;
@@ -487,25 +499,21 @@ export function BookReader(p: Props) {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  const canGoPrev = idx > 0 || canRewind;
+  useEffect(() => {
+    onNavChange?.({ goPrev: () => startFlipRef.current('prev'), canGoPrev });
+  }, [canGoPrev, onNavChange]);
+
   const flipping = flip.phase !== 'idle' && flip.progress > 0.001;
   const pFold = flip.progress;
   const curlW = 10 + 42 * Math.sin(Math.min(1, pFold) * Math.PI);
-  const totalPages = last + 1;
-  const pageLabel = `${Math.min(idx, last) + 1} / ${totalPages}`;
-  const canGoPrev = idx > 0 || canRewind;
   const foldStyle = {
     '--fold': `${(1 - pFold) * 100}%`,
     '--fold-inv': `${pFold * 100}%`,
   } as CSSProperties;
 
   return (
-    <div
-      className="reader"
-      ref={readerRef}
-      tabIndex={0}
-      onKeyDown={onKeyDown}
-      aria-label={`${title} 阅读器`}
-    >
+    <div className="reader" ref={readerRef} tabIndex={0} onKeyDown={onKeyDown} aria-label={`${chapterLabel} 阅读器`}>
       <div
         className={`book-shell${flipping ? ' is-flipping' : ''}${flip.phase === 'dragging' ? ' is-grabbing' : ''}`}
         ref={shellRef}
@@ -514,17 +522,10 @@ export function BookReader(p: Props) {
         onPointerUp={finishPointer}
         onPointerCancel={finishPointer}
       >
-        <div className="book-spine" aria-hidden />
-        <div className="book-edge" aria-hidden />
-
         <div className="book-stack" style={foldStyle}>
           {flipping && (
             <div className="sheet sheet-under">
-              <div className="sheet-pad">
-                <div className="sheet-body">
-                  <SheetView content={flip.dest} />
-                </div>
-              </div>
+              <SpreadView content={flip.dest} />
             </div>
           )}
 
@@ -538,14 +539,16 @@ export function BookReader(p: Props) {
                 : undefined,
             }}
           >
-            <div className="sheet-pad">
-              <div className="sheet-body">
-                <div className="page-measure" aria-hidden>
+            <div className="page-measure" aria-hidden>
+              <div className="book-spread">
+                <div className="leaf leaf-left">
                   <PageFace key={`m:${nodeId}`} paragraphs={paragraphs} pageIndex={0} onPageCount={handlePageCount} />
                 </div>
-                <SheetView key={`v:${nodeId}`} content={currentSheet()} onPick={startPick} />
+                <div className="book-gutter" />
+                <div className="leaf leaf-right" />
               </div>
             </div>
+            <SpreadView key={`v:${nodeId}`} content={currentSheet()} pageNumber={pageNumber} onPick={startPick} />
           </div>
 
           {flipping && (
@@ -565,61 +568,15 @@ export function BookReader(p: Props) {
           )}
         </div>
 
-        {chromeOpen && (
-          <header className="reader-chrome no-turn">
-            <span className="reader-title">{title}</span>
-          </header>
-        )}
-
-        <footer className="reader-pagenum">
-          <span>
-            第 {sectionIndex} 节 · {pageLabel}
-          </span>
-        </footer>
-
-        {hint && (
-          <div className="reader-hint no-turn">左右滑动翻页 · 右上角打开设置</div>
-        )}
+        {hint && <div className="reader-hint no-turn">左右滑动翻页</div>}
       </div>
 
-      <button
-        type="button"
-        className="reader-gear no-turn"
-        aria-label="打开设置"
-        aria-expanded={menuOpen}
-        aria-haspopup="dialog"
-        onClick={(e) => {
-          e.stopPropagation();
-          setMenuOpen(true);
-          setChromeOpen(true);
-        }}
-      >
-        设置
-      </button>
-
-      {menuOpen && (
-        <div
-          className="settings-overlay no-turn"
-          onClick={() => setMenuOpen(false)}
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <div
-            className="settings-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header className="settings-sheet-head">
-              <h3 id="settings-title">设置</h3>
-              <button type="button" className="settings-close" onClick={() => setMenuOpen(false)}>
-                关闭
-              </button>
-            </header>
-            {settings({ goPrev: () => startFlip('prev'), canGoPrev })}
-          </div>
+      <footer className="reader-progress no-turn">
+        <div className="reader-progress-track" aria-hidden>
+          <div className="reader-progress-fill" style={{ width: `${percent}%` }} />
         </div>
-      )}
+        <span>{percent}%</span>
+      </footer>
     </div>
   );
 }

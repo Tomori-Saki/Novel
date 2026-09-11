@@ -9,13 +9,15 @@ export function EndingScreen() {
 
   return (
     <div className="ending">
-      <div className="kicker">{story?.meta.title ?? '剧情'} · 结局</div>
+      <p className="kicker">{story?.meta.title ?? '剧情'} · 结局</p>
       <h2>{ending?.title ?? '剧终'}</h2>
       <div className="text">{ending?.text ?? '故事在这里画下了句点。'}</div>
-      <div className="row-between">
-        <button onClick={restart}>⟲ 再来一次</button>
-        <button className="primary" onClick={back}>
-          ☰ 返回标题
+      <div className="ending-actions">
+        <button type="button" className="title-btn" onClick={restart}>
+          再来一次
+        </button>
+        <button type="button" className="title-btn title-btn-primary" onClick={back}>
+          回到标题
         </button>
       </div>
     </div>

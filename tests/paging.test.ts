@@ -7,9 +7,9 @@ describe('阅读器视觉翻页', () => {
     expect(lastVisualIndex(1, false)).toBe(0);
   });
 
-  it('有选项时最后一页是选项页', () => {
-    expect(lastVisualIndex(3, true)).toBe(3);
-    expect(lastVisualIndex(1, true)).toBe(1);
+  it('有选项时最后一页仍是正文末页（选项在对页）', () => {
+    expect(lastVisualIndex(3, true)).toBe(2);
+    expect(lastVisualIndex(1, true)).toBe(0);
   });
 
   it('节点内向后翻走 local', () => {
@@ -24,7 +24,7 @@ describe('阅读器视觉翻页', () => {
     ).toEqual({ kind: 'local', nextIndex: 1 });
   });
 
-  it('正文末页且有选项 → 翻到选项页', () => {
+  it('正文末页且有选项 → 不能再往后翻，需点选', () => {
     expect(
       resolveTurn({
         dir: 'next',
@@ -33,7 +33,7 @@ describe('阅读器视觉翻页', () => {
         hasChoices: true,
         canRewind: true,
       }),
-    ).toEqual({ kind: 'local', nextIndex: 3 });
+    ).toEqual({ kind: 'blocked' });
   });
 
   it('正文末页且无选项 → 引擎下一节点', () => {
@@ -48,12 +48,12 @@ describe('阅读器视觉翻页', () => {
     ).toEqual({ kind: 'engine-next' });
   });
 
-  it('选项页不能再下一页', () => {
+  it('仅一页正文且有选项 → 不能再下一页', () => {
     expect(
       resolveTurn({
         dir: 'next',
-        visualIndex: 3,
-        textPageCount: 3,
+        visualIndex: 0,
+        textPageCount: 1,
         hasChoices: true,
         canRewind: true,
       }),
