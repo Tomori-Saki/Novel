@@ -9,10 +9,9 @@ export type TurnPlan =
   | { kind: 'engine-pick'; choiceId: string }
   | { kind: 'blocked' };
 
-/** 当前节点最后一页的 visualIndex（含选项页）。 */
-export function lastVisualIndex(textPageCount: number, hasChoices: boolean): number {
-  const n = Math.max(1, textPageCount);
-  return hasChoices ? n : n - 1;
+/** 当前节点最后一页的 visualIndex（仅正文；选项在对页/下方，不再单独占一页）。 */
+export function lastVisualIndex(textPageCount: number, _hasChoices?: boolean): number {
+  return Math.max(0, Math.max(1, textPageCount) - 1);
 }
 
 export function resolveTurn(opts: {
@@ -28,7 +27,7 @@ export function resolveTurn(opts: {
 
   if (dir === 'next') {
     if (idx < last) return { kind: 'local', nextIndex: idx + 1 };
-    // 选项页必须点选，不能再往右翻
+    // 正文读完后若有选项，必须点选，不能再往右翻
     if (hasChoices) return { kind: 'blocked' };
     return { kind: 'engine-next' };
   }

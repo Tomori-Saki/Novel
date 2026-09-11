@@ -9,8 +9,8 @@ export type ResolvedTheme = 'light' | 'dark';
 const STORAGE_KEY = 'reader-theme-mode';
 
 const THEME_COLOR: Record<ResolvedTheme, string> = {
-  light: '#efe8dc',
-  dark: '#121014',
+  light: '#f5f0e5',
+  dark: '#120f1c',
 };
 
 function readStoredMode(): ThemeMode {

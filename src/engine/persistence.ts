@@ -44,10 +44,14 @@ export function createDefaultStorage(): Storage {
 
 const PREFIX = 'inov:save:';
 
+/** 浏览器自动存档槽：标题页「继续阅读」只恢复这一份。 */
+export const AUTO_SLOT = 'auto';
+
 export interface SaveMeta {
   slot: string;
   storyId: string;
   savedAt: number;
+  nodeId?: string;
 }
 
 export interface SaveRecord extends SaveMeta {
@@ -63,9 +67,20 @@ export function saveGame(storage: Storage, slot: string, state: GameState): void
     slot,
     storyId: state.storyId,
     savedAt: Date.now(),
+    nodeId: state.currentNodeId,
     state,
   };
   storage.setItem(slotKey(slot), JSON.stringify(record));
+}
+
+/** 写入唯一自动存档（会覆盖上一份进度）。 */
+export function saveAutosave(storage: Storage, state: GameState): void {
+  saveGame(storage, AUTO_SLOT, state);
+}
+
+/** 读取自动存档；没有或损坏则返回 null。 */
+export function loadAutosave(storage: Storage): SaveRecord | null {
+  return loadGame(storage, AUTO_SLOT);
 }
 
 export function loadGame(storage: Storage, slot: string): SaveRecord | null {
@@ -91,7 +106,12 @@ export function listSaves(storage: Storage): SaveMeta[] {
     if (!raw) continue;
     try {
       const rec = JSON.parse(raw) as SaveRecord;
-      out.push({ slot: rec.slot, storyId: rec.storyId, savedAt: rec.savedAt });
+      out.push({
+        slot: rec.slot,
+        storyId: rec.storyId,
+        savedAt: rec.savedAt,
+        nodeId: rec.nodeId ?? rec.state?.currentNodeId,
+      });
     } catch {
       /* 跳过损坏存档 */
     }

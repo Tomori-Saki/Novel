@@ -1,5 +1,5 @@
 /**
- * 将节点正文按屏幕高度切成「一屏一页」（CSS 多栏分页，常见电子书做法）。
+ * 将节点正文按屏幕高度切成「一屏一页」（CSS 多栏分页）。
  * pageIndex = 'last' 用于回退时落在上一节点末页。
  */
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
@@ -71,7 +71,9 @@ export function PageFace({ paragraphs, pageIndex, onPageCount }: Props) {
         }}
       >
         {paragraphs.map((ln, i) => (
-          <p key={i}>{ln.text}</p>
+          <p key={i} className={ln.speaker ? 'line-say' : 'line-narr'}>
+            {ln.text}
+          </p>
         ))}
       </div>
     </div>

@@ -2,7 +2,8 @@
  * 引擎状态绑定（小说阅读模式）：用 zustand 把纯函数引擎接到 React。
  * UI 只跟这个 store 打交道，完全不碰引擎/parser 细节。
  *
- * 阅读模型：screen = title | play | ending；play 内部 page = reading（整页正文）| choices（单独选项页）。
+ * 阅读模型：screen = title | play | ending。
+ * 进度只走浏览器自动存档（单一槽位），没有读档页。
  */
 import { create } from 'zustand';
 import type { Choice, GameState, Line, Story, StoryNode } from '../engine/types';
@@ -11,15 +12,14 @@ import { createInitialState } from '../engine/state';
 import { findEnding } from '../engine/ending';
 import {
   createDefaultStorage,
-  listSaves,
-  loadGame,
-  saveGame,
-  type SaveMeta,
+  loadAutosave,
+  saveAutosave,
   type Storage,
 } from '../engine/persistence';
 import { getStories } from '../content/registry';
 import type { CompileError } from '../parser/compiler';
 import type { StorySummary } from '../content/loadStories';
+import { describeAutosave, type AutosavePreview } from '../ui/player/progress';
 
 export type Screen = 'title' | 'play' | 'ending';
 export type Page = 'reading' | 'choices';
@@ -32,8 +32,17 @@ interface EngineStore {
   story: Story | null;
   state: GameState | null;
   storage: Storage;
+  /** 本次进入阅读页是否播放 Title → 书本推进动画 */
+  enterFromTitle: boolean;
 
+  /** 装入新开局（不切屏，供标题过渡动画使用） */
+  bootNewGame: (id: string) => boolean;
+  /** 装入自动存档（不切屏） */
+  bootContinue: () => boolean;
+  /** 切到阅读屏 */
+  enterPlay: () => void;
   newGame: (id: string) => void;
+  continueReading: () => boolean;
   goChoices: () => void;
   goReading: () => void;
   pick: (choiceId: string) => void;
@@ -41,12 +50,16 @@ interface EngineStore {
   rewind: () => void;
   restart: () => void;
   backToTitle: () => void;
-  saveTo: (slot: string) => void;
-  loadSlot: (slot: string) => void;
-  refreshSaves: () => SaveMeta[];
+  peekAutosave: () => AutosavePreview | null;
+  defaultStoryId: () => string | null;
 }
 
 const loaded = getStories();
+
+function persist(storage: Storage, state: GameState | null) {
+  if (!state) return;
+  saveAutosave(storage, state);
+}
 
 export const useEngineStore = create<EngineStore>((set, get) => ({
   manifest: loaded.manifest,
@@ -56,62 +69,101 @@ export const useEngineStore = create<EngineStore>((set, get) => ({
   story: null,
   state: null,
   storage: createDefaultStorage(),
+  enterFromTitle: false,
+
+  bootNewGame: (id) => {
+    const story = loaded.stories.find((s) => s.meta.id === id) ?? null;
+    if (!story) return false;
+    const state = createInitialState(story);
+    persist(get().storage, state);
+    set({ story, state, page: 'reading', enterFromTitle: true });
+    return true;
+  },
+
+  bootContinue: () => {
+    const rec = loadAutosave(get().storage);
+    if (!rec) return false;
+    const story = loaded.stories.find((s) => s.meta.id === rec.state.storyId) ?? null;
+    if (!story) return false;
+    set({
+      story,
+      state: rec.state,
+      page: 'reading',
+      enterFromTitle: true,
+    });
+    return true;
+  },
+
+  enterPlay: () => {
+    const { story, state } = get();
+    if (!story || !state) return;
+    set({ screen: state.ended ? 'ending' : 'play' });
+  },
 
   newGame: (id) => {
-    const story = loaded.stories.find((s) => s.meta.id === id) ?? null;
-    if (!story) return;
-    set({ story, state: createInitialState(story), screen: 'play', page: 'reading' });
+    if (!get().bootNewGame(id)) return;
+    get().enterPlay();
+  },
+
+  continueReading: () => {
+    if (!get().bootContinue()) return false;
+    get().enterPlay();
+    return true;
   },
 
   goChoices: () => set({ page: 'choices' }),
   goReading: () => set({ page: 'reading' }),
 
   pick: (choiceId) => {
-    const { story, state } = get();
+    const { story, state, storage } = get();
     if (!story || !state || state.ended) return;
     const next = choose(state, story, choiceId);
-    // 选择后回到阅读页，展示目标节点正文
+    persist(storage, next);
     set({ state: next, page: 'reading' });
   },
 
   turnPage: () => {
-    const { story, state } = get();
+    const { story, state, storage } = get();
     if (!story || !state || state.ended) return;
     const next = nextPage(state, story);
+    persist(storage, next);
     set({ state: next, page: 'reading', screen: next.ended ? 'ending' : 'play' });
   },
 
   rewind: () => {
-    const { state } = get();
+    const { state, storage } = get();
     if (!state) return;
     const next = engRewind(state);
+    persist(storage, next);
     set({ state: next, page: 'reading', screen: next.ended ? 'ending' : 'play' });
   },
 
   restart: () => {
-    const { story } = get();
+    const { story, storage } = get();
     if (!story) return;
-    set({ state: createInitialState(story), screen: 'play', page: 'reading' });
+    const state = createInitialState(story);
+    persist(storage, state);
+    set({ state, screen: 'play', page: 'reading', enterFromTitle: false });
   },
 
-  backToTitle: () => set({ screen: 'title', story: null, state: null, page: 'reading' }),
-
-  saveTo: (slot) => {
+  backToTitle: () => {
     const { storage, state } = get();
-    if (!state) return;
-    saveGame(storage, slot, state);
+    persist(storage, state);
+    set({ screen: 'title', story: null, state: null, page: 'reading', enterFromTitle: false });
   },
 
-  loadSlot: (slot) => {
-    const { storage } = get();
-    const rec = loadGame(storage, slot);
-    if (!rec) return;
+  peekAutosave: () => {
+    const rec = loadAutosave(get().storage);
+    if (!rec) return null;
     const story = loaded.stories.find((s) => s.meta.id === rec.state.storyId) ?? null;
-    if (!story) return;
-    set({ story, state: rec.state, screen: rec.state.ended ? 'ending' : 'play', page: 'reading' });
+    return describeAutosave(rec, story);
   },
 
-  refreshSaves: () => listSaves(get().storage),
+  defaultStoryId: () => {
+    const rec = loadAutosave(get().storage);
+    if (rec && loaded.stories.some((s) => s.meta.id === rec.storyId)) return rec.storyId;
+    return loaded.manifest[0]?.id ?? null;
+  },
 }));
 
 /** —— 供组件使用的派生选择器（集中在此，UI 不直接依赖引擎内部） —— */
@@ -132,7 +184,7 @@ export function selectVisibleChoices(s: EngineStore): Choice[] {
   return availableChoices(s.story, s.state);
 }
 
-/** 当前节点是否含分支选项（决定阅读页底部是「进入选项页」还是「下一页」） */
+/** 当前节点是否含分支选项 */
 export function selectHasChoices(s: EngineStore): boolean {
   return (selectCurrentNode(s)?.choices.length ?? 0) > 0;
 }
@@ -144,7 +196,7 @@ export function selectIsLeaf(s: EngineStore): boolean {
   return node.choices.length === 0 && !node.next;
 }
 
-/** 翻页预览：下一节点正文；无下一节点则为结局页。有分支时由阅读器本地展示选项页。 */
+/** 翻页预览：下一节点正文；无下一节点则为结局页。 */
 export function selectPeekNext(s: EngineStore): { lines: Line[]; choices: Choice[]; hasChoices: boolean } | 'ending' | null {
   if (!s.story || !s.state) return null;
   const node = selectCurrentNode(s);
@@ -152,7 +204,7 @@ export function selectPeekNext(s: EngineStore): { lines: Line[]; choices: Choice
   if (node.choices.length > 0) return null;
   if (node.next && s.story.nodes[node.next]) {
     const n = s.story.nodes[node.next];
-    return { lines: n.lines, choices: [], hasChoices: false };
+    return { lines: n.lines, choices: n.choices, hasChoices: n.choices.length > 0 };
   }
   return 'ending';
 }
