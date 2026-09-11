@@ -423,10 +423,7 @@ export function BookReader(p: Props) {
     const w = shellRef.current?.clientWidth || window.innerWidth;
 
     if (!s.dragging) {
-      if (menuOpen) {
-        setMenuOpen(false);
-        return;
-      }
+      if (menuOpen) return;
       const ratio = e.clientX / w;
       if (ratio < 0.28) startFlip('prev');
       else if (ratio > 0.72) startFlip('next');
@@ -450,27 +447,37 @@ export function BookReader(p: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const tag = (e.target as HTMLElement).tagName;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (menuOpen) {
+        setMenuOpen(false);
+        readerRef.current?.focus();
+        return;
+      }
+      setChromeOpen((v) => !v);
+      return;
+    }
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (menuOpen) return;
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
       e.preventDefault();
       startFlip('next');
     } else if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'Backspace') {
       e.preventDefault();
       startFlip('prev');
-    } else if (e.key === 'Escape') {
-      setMenuOpen(false);
-      setChromeOpen((v) => !v);
     }
   };
 
   const startFlipRef = useRef(startFlip);
   startFlipRef.current = startFlip;
+  const menuOpenRef = useRef(menuOpen);
+  menuOpenRef.current = menuOpen;
 
   useEffect(() => {
     const el = shellRef.current;
     if (!el) return;
     const onWheel = (ev: WheelEvent) => {
-      if (busyRef.current) return;
+      if (busyRef.current || menuOpenRef.current) return;
       if (Math.abs(ev.deltaY) < 20 && Math.abs(ev.deltaX) < 20) return;
       ev.preventDefault();
       const goNext = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX > 0 : ev.deltaY > 0;
@@ -561,16 +568,6 @@ export function BookReader(p: Props) {
         {chromeOpen && (
           <header className="reader-chrome no-turn">
             <span className="reader-title">{title}</span>
-            <details
-              className="reader-menu"
-              open={menuOpen}
-              onToggle={(e) => setMenuOpen((e.target as HTMLDetailsElement).open)}
-            >
-              <summary aria-label="菜单">☰</summary>
-              <div className="fab-panel reader-menu-panel">
-                {settings({ goPrev: () => startFlip('prev'), canGoPrev })}
-              </div>
-            </details>
           </header>
         )}
 
@@ -580,8 +577,49 @@ export function BookReader(p: Props) {
           </span>
         </footer>
 
-        {hint && <div className="reader-hint no-turn">左右滑动翻页 · 点按中间显示菜单</div>}
+        {hint && (
+          <div className="reader-hint no-turn">左右滑动翻页 · 右上角打开设置</div>
+        )}
       </div>
+
+      <button
+        type="button"
+        className="reader-gear no-turn"
+        aria-label="打开设置"
+        aria-expanded={menuOpen}
+        aria-haspopup="dialog"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenuOpen(true);
+          setChromeOpen(true);
+        }}
+      >
+        设置
+      </button>
+
+      {menuOpen && (
+        <div
+          className="settings-overlay no-turn"
+          onClick={() => setMenuOpen(false)}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="settings-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="settings-sheet-head">
+              <h3 id="settings-title">设置</h3>
+              <button type="button" className="settings-close" onClick={() => setMenuOpen(false)}>
+                关闭
+              </button>
+            </header>
+            {settings({ goPrev: () => startFlip('prev'), canGoPrev })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

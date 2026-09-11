@@ -1,6 +1,7 @@
 /** 标题页：从已加载剧情清单里选择开局，或读取存档。 */
 import { useEngineStore } from '../store/useEngineStore';
 import { ImportDebugPanel } from './ImportDebugPanel';
+import { ThemeSwitch } from './theme/ThemeSwitch';
 
 export function TitleScreen() {
   const manifest = useEngineStore((s) => s.manifest);
@@ -13,8 +14,13 @@ export function TitleScreen() {
 
   return (
     <div className="title-screen">
-      <h1>互动小说播放器</h1>
-      <div className="sub">模块化引擎 · 信息差驱动 · .txt DSL 剧情热加载</div>
+      <div className="title-head">
+        <div>
+          <h1>互动小说播放器</h1>
+          <div className="sub">模块化引擎 · 信息差驱动 · .txt DSL 剧情热加载</div>
+        </div>
+        <ThemeSwitch />
+      </div>
 
       {manifest.length === 0 ? (
         <div className="empty">
@@ -42,7 +48,7 @@ export function TitleScreen() {
 
       {saves.length > 0 && (
         <div className="section-gap">
-          <h4 style={{ color: 'var(--muted-on-dark)' }}>继续游戏</h4>
+          <h4 className="title-continue">继续游戏</h4>
           <div className="row-between" style={{ flexWrap: 'wrap' }}>
             {saves.map((s) => (
               <button key={s.slot} className="ghost" onClick={() => loadSlot(s.slot)}>
