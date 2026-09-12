@@ -49,7 +49,8 @@ export function TitleScreen() {
 
   const storyId = defaultStoryId();
   const fallback = storyId ? getStory(storyId) : null;
-  const coverChapter = save?.chapterLabel ?? (fallback ? chapterLabel(fallback.entry) : 'Interactive Novel');
+  const storyTitle = fallback?.meta.title ?? save?.storyTitle ?? '互动小说';
+  const coverChapter = save?.chapterLabel ?? (fallback ? chapterLabel(fallback.entry) : storyTitle);
   const coverExcerpt =
     save?.excerpt ?? (fallback ? excerptFrom(fallback, fallback.entry) : '点右侧书本进入阅读');
   const coverPercent = save?.percent;
@@ -122,8 +123,8 @@ export function TitleScreen() {
       <div className="title-glow" aria-hidden />
 
       <div className="title-copy">
-        <p className="title-kicker">INTERACTIVE NOVEL</p>
-        <h1>Interactive Novel</h1>
+        <p className="title-kicker">互动小说</p>
+        <h1>{storyTitle}</h1>
         <p className="sub">{save ? '点右侧书本进入阅读' : '文本优先的互动小说播放器'}</p>
 
         <div className="title-actions">

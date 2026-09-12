@@ -1,5 +1,5 @@
 /**
- * 仿真书本阅读器：对开页（左文右选项）+ 跟手卷页。
+ * 仿真书本阅读器：PC 对开正文、窄屏单页；选项只在读完后出现。
  */
 import {
   useCallback,
@@ -13,7 +13,7 @@ import {
 } from 'react';
 import type { Choice, Line } from '../../engine/types';
 import { PageFace } from './PageFace';
-import { lastVisualIndex, resolveTurn, type FlipDir, type TurnPlan } from './paging';
+import { lastVisualIndex, resolveTurn, spreadSlots, SPREAD_MIN_WIDTH, type FlipDir, type TurnPlan } from './paging';
 
 export interface PeekNode {
   lines: Line[];
@@ -47,7 +47,13 @@ interface Props {
 }
 
 type SheetContent =
-  | { type: 'text'; paragraphs: Line[]; pageIndex: number | 'last'; choices: Choice[] }
+  | {
+      type: 'text';
+      paragraphs: Line[];
+      visualIndex: number | 'last';
+      hasChoices: boolean;
+      choices: Choice[];
+    }
   | { type: 'ending' }
   | { type: 'blank' };
 
@@ -75,6 +81,11 @@ const COMPLETE_VELOCITY = 0.42;
 
 function prefersReducedMotion(): boolean {
   return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+function readPerSpread(): number {
+  if (typeof window === 'undefined') return 1;
+  return window.matchMedia(`(min-width: ${SPREAD_MIN_WIDTH}px)`).matches ? 2 : 1;
 }
 
 function animateProgress(from: number, to: number, onFrame: (p: number) => void, onDone: () => void): () => void {
@@ -136,15 +147,20 @@ function ChoicesPane({
 
 function SpreadView({
   content,
+  perSpread,
   pageNumber,
-  onTextPageCount,
+  textPageCount,
   onPick,
 }: {
   content: SheetContent;
+  perSpread: number;
   pageNumber?: number;
-  onTextPageCount?: (n: number) => void;
+  textPageCount?: number;
   onPick?: (id: string) => void;
 }) {
+  const [localCount, setLocalCount] = useState(1);
+  const count = Math.max(1, textPageCount ?? localCount);
+
   if (content.type === 'blank') {
     return (
       <div className="book-spread">
@@ -170,15 +186,44 @@ function SpreadView({
       </div>
     );
   }
+
+  const vis =
+    content.visualIndex === 'last'
+      ? lastVisualIndex(count, content.hasChoices, perSpread)
+      : content.visualIndex;
+  const slots = spreadSlots(vis, count, content.hasChoices, perSpread);
+  const spreadClass = [
+    'book-spread',
+    slots.showChoices ? 'has-choices' : '',
+    perSpread >= 2 ? 'is-spread' : 'is-single',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="book-spread">
+    <div className={spreadClass}>
+      {textPageCount == null && (
+        <div className="page-measure" aria-hidden>
+          <div className="book-spread">
+            <div className="leaf leaf-left">
+              <PageFace paragraphs={content.paragraphs} pageIndex={0} onPageCount={setLocalCount} />
+            </div>
+            <div className="book-gutter" />
+            <div className="leaf leaf-right" />
+          </div>
+        </div>
+      )}
       <div className="leaf leaf-left">
         {pageNumber != null && <div className="leaf-pagenum">{pageNumber}</div>}
-        <PageFace paragraphs={content.paragraphs} pageIndex={content.pageIndex} onPageCount={onTextPageCount} />
+        <PageFace paragraphs={content.paragraphs} pageIndex={slots.left} />
       </div>
       <div className="book-gutter" aria-hidden />
       <div className="leaf leaf-right">
-        <ChoicesPane choices={content.choices} onPick={onPick} />
+        {slots.showChoices ? (
+          <ChoicesPane choices={content.choices} onPick={onPick} />
+        ) : (
+          <PageFace paragraphs={content.paragraphs} pageIndex={slots.right} />
+        )}
       </div>
     </div>
   );
@@ -207,11 +252,16 @@ export function BookReader(p: Props) {
   const readerRef = useRef<HTMLDivElement>(null);
   const landLastRef = useRef(false);
   const skipResetRef = useRef(false);
-  const hasChoicesRef = useRef(hasChoices);
-  hasChoicesRef.current = hasChoices;
   const flipRef = useRef<FlipState>(IDLE);
   const cancelAnim = useRef<(() => void) | null>(null);
   const busyRef = useRef(false);
+  const hasChoicesRef = useRef(hasChoices);
+  hasChoicesRef.current = hasChoices;
+
+  const [perSpread, setPerSpread] = useState(readPerSpread);
+  const perSpreadRef = useRef(perSpread);
+  perSpreadRef.current = perSpread;
+  const prevSpreadRef = useRef(perSpread);
 
   const [textPageCount, setTextPageCount] = useState(1);
   const [visualIndex, setVisualIndex] = useState(0);
@@ -230,11 +280,30 @@ export function BookReader(p: Props) {
   const handlePageCount = useCallback((n: number) => {
     setTextPageCount(n);
     if (landLastRef.current) {
-      setVisualIndex(Math.max(0, n - 1));
+      setVisualIndex(lastVisualIndex(n, hasChoicesRef.current, perSpreadRef.current));
       landLastRef.current = false;
       setLandLast(false);
     }
   }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${SPREAD_MIN_WIDTH}px)`);
+    const sync = () => setPerSpread(mq.matches ? 2 : 1);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (prevSpreadRef.current === perSpread) return;
+    const from = prevSpreadRef.current;
+    prevSpreadRef.current = perSpread;
+    setVisualIndex((i) => {
+      if (from === 1 && perSpread === 2) return Math.floor(i / 2);
+      if (from === 2 && perSpread === 1) return i * 2;
+      return i;
+    });
+  }, [perSpread]);
 
   useLayoutEffect(() => {
     cancelAnim.current?.();
@@ -245,6 +314,7 @@ export function BookReader(p: Props) {
       return;
     }
     setVisualIndex(0);
+    setTextPageCount(1);
     setLandLast(false);
     landLastRef.current = false;
     setFlip(IDLE);
@@ -267,29 +337,56 @@ export function BookReader(p: Props) {
     return () => window.clearTimeout(t);
   }, [hint]);
 
-  const last = lastVisualIndex(textPageCount, hasChoices);
+  const last = lastVisualIndex(textPageCount, hasChoices, perSpread);
   const idx = Math.min(visualIndex, last);
 
-  const currentSheet = (): SheetContent => {
-    if (landLast) return { type: 'text', paragraphs, pageIndex: 'last', choices };
-    return { type: 'text', paragraphs, pageIndex: Math.max(0, idx), choices };
-  };
+  const currentSheet = (): SheetContent => ({
+    type: 'text',
+    paragraphs,
+    visualIndex: landLast ? 'last' : Math.max(0, idx),
+    hasChoices,
+    choices,
+  });
 
   const buildDest = (plan: TurnPlan, pickId?: string): SheetContent => {
     if (plan.kind === 'blocked') return { type: 'blank' };
     if (plan.kind === 'local') {
-      return { type: 'text', paragraphs, pageIndex: plan.nextIndex, choices };
+      return {
+        type: 'text',
+        paragraphs,
+        visualIndex: plan.nextIndex,
+        hasChoices,
+        choices,
+      };
     }
     if (plan.kind === 'engine-next') {
       if (peekNext === 'ending' || peekNext === null) return { type: 'ending' };
-      return { type: 'text', paragraphs: peekNext.lines, pageIndex: 0, choices: peekNext.choices };
+      return {
+        type: 'text',
+        paragraphs: peekNext.lines,
+        visualIndex: 0,
+        hasChoices: peekNext.hasChoices,
+        choices: peekNext.choices,
+      };
     }
     if (plan.kind === 'engine-prev') {
       if (!peekPrev) return { type: 'blank' };
-      return { type: 'text', paragraphs: peekPrev.lines, pageIndex: 'last', choices: peekPrev.choices };
+      return {
+        type: 'text',
+        paragraphs: peekPrev.lines,
+        visualIndex: 'last',
+        hasChoices: peekPrev.hasChoices,
+        choices: peekPrev.choices,
+      };
     }
     const next = peekGoto(pickId ?? plan.choiceId);
-    return { type: 'text', paragraphs: next.lines, pageIndex: 0, choices: next.choices };
+    return {
+      type: 'text',
+      paragraphs: next.lines,
+      visualIndex: 0,
+      hasChoices: next.hasChoices,
+      choices: next.choices,
+    };
   };
 
   const commitPlan = (plan: TurnPlan) => {
@@ -350,6 +447,7 @@ export function BookReader(p: Props) {
       textPageCount,
       hasChoices,
       canRewind,
+      perSpread,
     });
     const dest = buildDest(plan);
     const blocked = plan.kind === 'blocked';
@@ -422,6 +520,7 @@ export function BookReader(p: Props) {
         textPageCount,
         hasChoices,
         canRewind,
+        perSpread,
       });
       setHint(false);
       setFlip({
@@ -525,7 +624,7 @@ export function BookReader(p: Props) {
         <div className="book-stack" style={foldStyle}>
           {flipping && (
             <div className="sheet sheet-under">
-              <SpreadView content={flip.dest} />
+              <SpreadView content={flip.dest} perSpread={perSpread} />
             </div>
           )}
 
@@ -548,7 +647,14 @@ export function BookReader(p: Props) {
                 <div className="leaf leaf-right" />
               </div>
             </div>
-            <SpreadView key={`v:${nodeId}`} content={currentSheet()} pageNumber={pageNumber} onPick={startPick} />
+            <SpreadView
+              key={`v:${nodeId}`}
+              content={currentSheet()}
+              perSpread={perSpread}
+              pageNumber={pageNumber}
+              textPageCount={textPageCount}
+              onPick={startPick}
+            />
           </div>
 
           {flipping && (

@@ -1,15 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { lastVisualIndex, resolveTurn } from '../src/ui/reader/paging';
+import { lastVisualIndex, resolveTurn, spreadSlots } from '../src/ui/reader/paging';
 
 describe('阅读器视觉翻页', () => {
-  it('无选项时最后一页是正文末页', () => {
-    expect(lastVisualIndex(3, false)).toBe(2);
-    expect(lastVisualIndex(1, false)).toBe(0);
+  it('窄屏：最后一展就是正文末页', () => {
+    expect(lastVisualIndex(3, false, 1)).toBe(2);
+    expect(lastVisualIndex(1, false, 1)).toBe(0);
+    expect(lastVisualIndex(3, true, 1)).toBe(2);
   });
 
-  it('有选项时最后一页仍是正文末页（选项在对页）', () => {
-    expect(lastVisualIndex(3, true)).toBe(2);
-    expect(lastVisualIndex(1, true)).toBe(0);
+  it('PC 对开：4 页正文合成 2 展', () => {
+    expect(lastVisualIndex(4, false, 2)).toBe(1);
+    expect(lastVisualIndex(3, false, 2)).toBe(1);
+    expect(lastVisualIndex(1, false, 2)).toBe(0);
+  });
+
+  it('PC 对开且选项：偶数页正文后再加一展放选项', () => {
+    expect(lastVisualIndex(4, true, 2)).toBe(2);
+    expect(lastVisualIndex(3, true, 2)).toBe(1);
+    expect(lastVisualIndex(1, true, 2)).toBe(0);
+  });
+
+  it('PC 对开槽位：左右各一栏正文', () => {
+    expect(spreadSlots(0, 4, false, 2)).toEqual({ left: 0, right: 1, showChoices: false });
+    expect(spreadSlots(1, 4, false, 2)).toEqual({ left: 2, right: 3, showChoices: false });
+    expect(spreadSlots(1, 3, false, 2)).toEqual({ left: 2, right: null, showChoices: false });
+  });
+
+  it('窄屏槽位：只有左栏，选项在末页', () => {
+    expect(spreadSlots(0, 3, false, 1)).toEqual({ left: 0, right: null, showChoices: false });
+    expect(spreadSlots(2, 3, true, 1)).toEqual({ left: 2, right: null, showChoices: true });
+  });
+
+  it('PC 对开槽位：奇数末页右侧给选项', () => {
+    expect(spreadSlots(1, 3, true, 2)).toEqual({ left: 2, right: null, showChoices: true });
+    expect(spreadSlots(2, 4, true, 2)).toEqual({ left: null, right: null, showChoices: true });
   });
 
   it('节点内向后翻走 local', () => {
@@ -20,6 +44,19 @@ describe('阅读器视觉翻页', () => {
         textPageCount: 3,
         hasChoices: false,
         canRewind: false,
+      }),
+    ).toEqual({ kind: 'local', nextIndex: 1 });
+  });
+
+  it('PC 对开首页下一展', () => {
+    expect(
+      resolveTurn({
+        dir: 'next',
+        visualIndex: 0,
+        textPageCount: 4,
+        hasChoices: false,
+        canRewind: false,
+        perSpread: 2,
       }),
     ).toEqual({ kind: 'local', nextIndex: 1 });
   });

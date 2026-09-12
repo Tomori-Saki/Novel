@@ -518,6 +518,7 @@ button:disabled {
 }
 
 .book-spread {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 20px 1fr;
   height: 100%;
@@ -546,6 +547,20 @@ button:disabled {
   color: var(--ink-soft);
   margin-bottom: 18px;
   font-family: var(--ui-font);
+}
+
+/* 阅读器左右页高度必须一致，页码改成浮层，避免左页被挤矮、右页多出一行 */
+.book-shell .leaf {
+  position: relative;
+  padding-top: 52px;
+}
+.book-shell .leaf-pagenum {
+  position: absolute;
+  top: 16px;
+  left: 48px;
+  right: 48px;
+  margin-bottom: 0;
+  pointer-events: none;
 }
 
 .page-measure {
@@ -1022,8 +1037,8 @@ button:disabled {
     right: auto;
     top: auto;
     transform: none;
-    width: min(360px, calc(100% - 48px));
-    height: 280px;
+    width: min(280px, calc(100% - 48px));
+    height: min(400px, 52vh);
     margin: 12px auto 32px;
     display: block;
   }
@@ -1066,7 +1081,18 @@ button:disabled {
   .leaf {
     padding: 28px 22px 48px;
   }
-  .leaf-right {
+  .book-shell .leaf {
+    padding-top: 44px;
+  }
+  .book-shell .leaf-pagenum {
+    left: 22px;
+    right: 22px;
+  }
+  /* 窄屏无选项时不要把空右栏挤掉正文 */
+  .book-shell .book-spread:not(.has-choices) .leaf-right {
+    display: none;
+  }
+  .book-shell .book-spread.has-choices .leaf-right {
     height: auto;
     max-height: 46%;
     padding-top: 0;

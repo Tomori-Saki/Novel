@@ -1,5 +1,5 @@
 /**
- * 全屏阅读：顶栏 + 对开书页。选项在右页（窄屏在正文下方）。
+ * 全屏阅读：顶栏 + 书页。PC 左右对开排正文，选项读完再出；窄屏单页。
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
